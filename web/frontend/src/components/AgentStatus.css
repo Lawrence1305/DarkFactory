@@ -1,0 +1,108 @@
+.agent-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.agent-card.running {
+  border-color: var(--accent-blue);
+}
+
+.agent-card.blocked {
+  border-color: var(--accent-red);
+}
+
+.agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.agent-name {
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.status-badge.idle {
+  background: rgba(136, 136, 160, 0.2);
+  color: var(--text-secondary);
+}
+
+.status-badge.running {
+  background: rgba(74, 158, 255, 0.2);
+  color: var(--accent-blue);
+}
+
+.status-badge.blocked {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--accent-red);
+}
+
+.status-badge.stopped {
+  background: rgba(136, 136, 160, 0.2);
+  color: var(--text-muted);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.agent-task {
+  display: flex;
+  gap: 6px;
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+}
+
+.task-label {
+  color: var(--text-muted);
+}
+
+.task-name {
+  color: var(--text-primary);
+}
+
+.agent-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-progress .progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-primary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.agent-progress .progress-fill {
+  height: 100%;
+  background: var(--accent-blue);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 0.75rem;
+  color: var(--accent-blue);
+  font-weight: 500;
+}

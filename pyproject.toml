@@ -1,0 +1,81 @@
+[project]
+name = "darkfactory"
+version = "0.1.0"
+description = "AI-native agent framework with self-improvement and memory"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "DarkFactory Team"}
+]
+keywords = ["ai", "agent", "self-improvement", "memory", "task-planning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "chromadb>=0.4.0",
+    "playwright>=1.40",
+    "click>=8.0",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.0",
+    "websockets>=11.0",
+    "httpx>=0.25.0",
+    "jinja2>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+darkfactory = "darkfactory.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[project.urls]
+Homepage = "https://github.com/darkfactory/darkfactory"
+Documentation = "https://darkfactory.dev/docs"
+Repository = "https://github.com/darkfactory/darkfactory"

@@ -1,0 +1,45 @@
+.console {
+  flex: 1;
+  background: var(--bg-primary);
+  border-radius: 8px;
+  overflow: auto;
+  font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+  font-size: 0.8rem;
+}
+
+.console-content {
+  padding: 12px;
+}
+
+.log-entry {
+  display: flex;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.log-entry:hover {
+  background: var(--bg-tertiary);
+}
+
+.log-timestamp {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.log-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.log-message {
+  flex: 1;
+  word-break: break-word;
+}
+
+.log-entry.info .log-icon { color: var(--accent-blue); }
+.log-entry.warning .log-icon { color: var(--accent-yellow); }
+.log-entry.success .log-icon { color: var(--accent-green); }
+.log-entry.error .log-icon { color: var(--accent-red); }

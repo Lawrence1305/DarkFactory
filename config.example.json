@@ -1,0 +1,26 @@
+{
+  "llm": {
+    "provider": "custom",
+    "provider_type": "openai",
+    "api_key": "your-api-key-here",
+    "base_url": "https://api.openai.com/v1/chat/completions",
+    "model": "gpt-4o",
+    "max_tokens": 4096,
+    "temperature": 0.7
+  },
+  "memory": {
+    "memory_path": "./memory",
+    "palace_path": "./memory/palace",
+    "kg_path": "./memory/kg.db"
+  },
+  "agent": {
+    "max_agents": 4
+  },
+  "validation": {
+    "level": "strict"
+  },
+  "skill": {
+    "auto_generate": true
+  },
+  "workspace": "."
+}
