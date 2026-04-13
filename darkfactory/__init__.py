@@ -13,7 +13,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import click
 from rich.console import Console
@@ -21,6 +21,8 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 from rich import print as rprint
+
+import questionary
 
 from .config import Config, load_config, detect_provider_type, ProviderType, LLMProvider
 from .config import (
@@ -141,61 +143,166 @@ def config_set(api_key, base_url, model, provider_type, max_agents, workspace):
 
 
 @config.command("setup")
-@click.option("--provider", type=click.Choice(["anthropic", "openai", "minimax", "qwen", "deepseek"]),
-              help="Quick setup provider")
-def config_setup(provider):
-    """Interactive configuration setup."""
-    cfg = Config()
+@click.option("--provider", type=str, help="Provider to set up (optional)")
+def config_setup(provider: str):
+    """
+    Interactive model configuration setup.
 
-    console.print("[bold green]DarkFactory Configuration Setup[/bold green]\n")
+    Follows the OpenClaw-style interactive setup flow:
+    1. Select a provider
+    2. Configure auth method
+    3. Enter API key
+    4. Select model
+    5. Configure agents
+    """
+    console.print(Panel.fit(
+        "[bold green]DarkFactory Model Configuration[/bold green]\n"
+        "Interactive setup for AI model providers",
+        border_style="green"
+    ))
+    console.print()
 
-    providers_map = {
-        "anthropic": ("anthropic", "Anthropic Claude", "https://api.anthropic.com", "claude-sonnet-4-20250514"),
-        "openai": ("openai", "OpenAI GPT-4", "https://api.openai.com/v1", "gpt-4o"),
-        "minimax": ("anthropic", "MiniMax", "https://api.minimax.chat/v1/text/chatcompletion_v2", "MiniMax-Text-01"),
-        "qwen": ("openai", "Qwen (通义千问)", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
-        "deepseek": ("openai", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
-    }
+    # Step 1: Select provider
+    provider_options = []
+    for pid, pdata in BUILTIN_PROVIDERS.items():
+        provider_options.append({
+            "name": f"{pdata['name']} ({pid})",
+            "value": pid,
+        })
+    provider_options.append({"name": "Custom provider", "value": "custom"})
 
-    if provider and provider in providers_map:
-        p = providers_map[provider]
-        cfg.llm.provider_type = ProviderType(p[0])
-        cfg.llm.base_url = p[2]
-        cfg.llm.model = p[3]
-        console.print(f"[cyan]Selected:[/cyan] {p[1]}")
+    if provider and provider in BUILTIN_PROVIDERS:
+        selected_provider_id = provider
+        console.print(f"[cyan]Provider selected via --provider:[/cyan] {selected_provider_id}")
     else:
-        console.print("Select a provider:")
-        for key, (_, name, _, _) in providers_map.items():
-            console.print(f"  [cyan]{key}[/cyan]. {name}")
-        console.print("  [cyan]custom[/cyan]. Custom provider\n")
+        selected_provider_id = questionary.select(
+            "Select a model provider:",
+            choices=provider_options,
+            style=questionary.Style([
+                ('selected', 'fg:ansigreen bold'),
+                ('pointer', 'fg:ansigreen bold'),
+            ])
+        ).ask()
 
-        choice = Prompt.ask("Enter choice", default="minimax")
+    console.print()
 
-        if choice in providers_map:
-            p = providers_map[choice]
-            cfg.llm.provider_type = ProviderType(p[0])
-            cfg.llm.base_url = p[2]
-            cfg.llm.model = p[3]
+    # Step 2: Get provider config
+    if selected_provider_id == "custom":
+        base_url = questionary.text(
+            "Enter the API base URL:",
+            validate=lambda x: len(x) > 0 or "URL is required"
+        ).ask()
+        api_type = questionary.select(
+            "Select API type:",
+            choices=[
+                {"name": "OpenAI-compatible", "value": "openai"},
+                {"name": "Anthropic-compatible", "value": "anthropic"},
+            ]
+        ).ask()
+        provider_name = questionary.text(
+            "Provider name (for display):",
+            default="Custom Provider"
+        ).ask()
+    else:
+        pdata = BUILTIN_PROVIDERS[selected_provider_id]
+        provider_name = pdata["name"]
+        base_url = pdata["base_url"]
+        api_type = pdata["api"]
+        console.print(f"[dim]Provider:[/dim] {provider_name}")
+        console.print(f"[dim]API URL:[/dim] {base_url}")
+
+    console.print()
+
+    # Step 3: Enter API key
+    api_key = questionary.password(
+        f"Enter API key for {provider_name}:",
+        validate=lambda x: len(x) > 0 or "API key is required"
+    ).ask()
+
+    console.print()
+
+    # Step 4: Select model
+    if selected_provider_id == "custom":
+        model_id = questionary.text(
+            "Enter model name:",
+            default="gpt-4o",
+            validate=lambda x: len(x) > 0 or "Model name is required"
+        ).ask()
+    else:
+        pdata = BUILTIN_PROVIDERS[selected_provider_id]
+        model_options = [
+            {"name": f"{m['name']} ({m['id']})", "value": m['id']}
+            for m in pdata.get("models", [])
+        ]
+        if not model_options:
+            model_id = questionary.text(
+                "Enter model name:",
+                default="gpt-4o"
+            ).ask()
         else:
-            cfg.llm.base_url = Prompt.ask("Enter base URL")
-            cfg.llm.provider_type = detect_provider_type(cfg.llm.base_url)
-            cfg.llm.model = Prompt.ask("Enter model name", default="gpt-4o")
+            model_id = questionary.select(
+                "Select a model:",
+                choices=model_options
+            ).ask()
 
     console.print()
-    api_key = Prompt.ask("Enter API key", password=True)
+
+    # Step 5: Configure agents
+    max_agents = questionary.text(
+        "Max parallel agents:",
+        default="4",
+        validate=lambda x: x.isdigit() and int(x) > 0 or "Must be a positive number"
+    ).ask()
+
+    console.print()
+
+    # Update models config
+    models_config = load_models_config()
+
+    # Create or update provider
+    if selected_provider_id != "custom" and selected_provider_id in models_config.providers:
+        prov = models_config.providers[selected_provider_id]
+        prov.api_key = api_key
+        prov.base_url = base_url
+    else:
+        prov = ModelProvider(
+            id=selected_provider_id,
+            name=provider_name,
+            base_url=base_url,
+            api_key=api_key,
+            api=ModelApi(api_type),
+            models=[]
+        )
+        models_config.providers[selected_provider_id] = prov
+
+    # Set as primary model
+    models_config.primary_model = f"{selected_provider_id}/{model_id}"
+
+    # Save models config
+    save_models_config(models_config)
+
+    # Also update main config
+    cfg = Config()
+    cfg.llm.base_url = base_url
     cfg.llm.api_key = api_key
-
-    console.print()
-    max_agents = Prompt.ask("Max parallel agents", default="4")
+    cfg.llm.model = model_id
+    cfg.llm.provider_type = ProviderType(api_type)
     cfg.agent.max_agents = int(max_agents)
 
     config_path = get_config_path()
     cfg.save(str(config_path))
 
-    console.print(f"\n[green]Configuration saved to {config_path}[/green]")
-    console.print(f"[cyan]Provider:[/cyan] {cfg.llm.provider_type.value}")
-    console.print(f"[cyan]Model:[/cyan] {cfg.llm.model}")
-    console.print("\n[dim]Run 'darkfactory config show' to verify.[/dim]")
+    console.print()
+    console.print(Panel.fit(
+        f"[bold green]Configuration Complete![/bold green]\n"
+        f"Provider: {provider_name}\n"
+        f"Model: {model_id}\n"
+        f"Max Agents: {max_agents}",
+        border_style="green"
+    ))
+    console.print()
+    console.print("[dim]Run 'darkfactory config show' to verify configuration.[/dim]")
+    console.print("[dim]Run 'darkfactory config models list' to see all available models.[/dim]")
 
 
 @config.command("reset")
@@ -378,6 +485,216 @@ def config_models_reset():
     if models_path.exists():
         models_path.unlink()
     console.print("[yellow]Models config reset to defaults.[/yellow]")
+
+
+# =============================================================================
+# Config Auth Subcommands (OpenClaw-style)
+# =============================================================================
+
+@config.group("auth")
+def config_auth():
+    """Manage model authentication profiles."""
+    pass
+
+
+@config_auth.command("login")
+@click.option("--provider", type=str, help="Provider id (e.g., anthropic, openai)")
+@click.option("--method", type=str, help="Auth method (e.g., api-key, oauth)")
+def config_auth_login(provider: str, method: str):
+    """
+    Interactive login to a model provider.
+
+    Opens an interactive flow to authenticate with a provider.
+    Similar to 'openclaw models auth login'.
+    """
+    console.print(Panel.fit(
+        "[bold green]Provider Authentication[/bold green]\n"
+        "Login to a model provider",
+        border_style="green"
+    ))
+    console.print()
+
+    models_config = load_models_config()
+
+    # Get list of providers
+    provider_options = []
+    for pid, pdata in BUILTIN_PROVIDERS.items():
+        provider_options.append({
+            "name": f"{pdata['name']} ({pid})",
+            "value": pid,
+        })
+
+    if provider and provider in BUILTIN_PROVIDERS:
+        selected_provider_id = provider
+        console.print(f"[cyan]Provider selected:[/cyan] {selected_provider_id}")
+    else:
+        selected_provider_id = questionary.select(
+            "Select a provider:",
+            choices=provider_options
+        ).ask()
+
+    console.print()
+
+    # Select auth method
+    auth_methods = [
+        {"name": "API Key (paste token)", "value": "api-key"},
+    ]
+
+    if not provider or method == "api-key":
+        selected_method = questionary.select(
+            "Select authentication method:",
+            choices=auth_methods
+        ).ask()
+    else:
+        selected_method = method
+
+    console.print()
+
+    # Get API key
+    if selected_method == "api-key":
+        api_key = questionary.password(
+            f"Enter API key for {selected_provider_id}:",
+            validate=lambda x: len(x) > 0 or "API key is required"
+        ).ask()
+
+        # Update models config
+        if selected_provider_id in models_config.providers:
+            models_config.providers[selected_provider_id].api_key = api_key
+        else:
+            pdata = BUILTIN_PROVIDERS.get(selected_provider_id, {})
+            models_config.providers[selected_provider_id] = ModelProvider(
+                id=selected_provider_id,
+                name=pdata.get("name", selected_provider_id),
+                base_url=pdata.get("base_url", ""),
+                api_key=api_key,
+                api=ModelApi(pdata.get("api", "openai")),
+                models=[]
+            )
+
+        save_models_config(models_config)
+
+        console.print()
+        console.print(f"[green]Successfully authenticated with {selected_provider_id}[/green]")
+    else:
+        console.print(f"[yellow]Auth method '{selected_method}' not implemented yet.[/yellow]")
+
+
+@config_auth.command("add")
+def config_auth_add():
+    """
+    Add a new authentication profile.
+
+    Similar to 'openclaw models auth add'.
+    """
+    console.print(Panel.fit(
+        "[bold green]Add Authentication Profile[/bold green]\n"
+        "Add a new provider authentication",
+        border_style="green"
+    ))
+    console.print()
+
+    # This is essentially the same as login
+    # Reuse the login flow
+    config_auth_login.callback()
+
+
+@config_auth.command("paste-token")
+@click.argument("provider_id")
+@click.option("--profile-id", type=str, help="Profile id (default: provider:manual)")
+@click.option("--expires-in", type=str, help="Token expiry (e.g., 365d, 12h)")
+def config_auth_paste_token(provider_id: str, profile_id: str, expires_in: str):
+    """
+    Paste a token directly into auth profiles.
+
+    Similar to 'openclaw models auth paste-token'.
+    """
+    models_config = load_models_config()
+
+    if provider_id not in BUILTIN_PROVIDERS and provider_id not in models_config.providers:
+        console.print(f"[red]Unknown provider: {provider_id}[/red]")
+        return
+
+    pdata = BUILTIN_PROVIDERS.get(provider_id, {})
+    provider_name = pdata.get("name", provider_id)
+
+    token = questionary.password(
+        f"Paste token for {provider_name}:",
+        validate=lambda x: len(x) > 0 or "Token is required"
+    ).ask()
+
+    # Store in models config
+    if provider_id in models_config.providers:
+        models_config.providers[provider_id].api_key = token
+    else:
+        models_config.providers[provider_id] = ModelProvider(
+            id=provider_id,
+            name=provider_name,
+            base_url=pdata.get("base_url", ""),
+            api_key=token,
+            api=ModelApi(pdata.get("api", "openai")),
+            models=[]
+        )
+
+    save_models_config(models_config)
+
+    console.print()
+    console.print(f"[green]Token saved for {provider_name}[/green]")
+    if expires_in:
+        console.print(f"[dim]Expires in: {expires_in}[/dim]")
+
+
+@config_auth.command("status")
+@click.option("--json", "output_json", is_flag=True, help="Output as JSON")
+@click.option("--probe", is_flag=True, help="Probe provider auth (live)")
+def config_auth_status(output_json: bool, probe: bool):
+    """
+    Show authentication status.
+
+    Similar to 'openclaw models auth status'.
+    """
+    models_config = load_models_config()
+
+    if output_json:
+        import json
+        providers_with_keys = {
+            pid: {"has_key": bool(p.api_key), "url": p.base_url}
+            for pid, p in models_config.providers.items()
+        }
+        print(json.dumps(providers_with_keys, indent=2))
+        return
+
+    console.print("[bold blue]Authentication Status[/bold blue]\n")
+
+    if not models_config.providers:
+        console.print("[yellow]No providers configured.[/yellow]")
+        console.print("[dim]Run 'darkfactory config auth login' to authenticate.[/dim]")
+        return
+
+    table = Table()
+    table.add_column("Provider", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("API Key", style="yellow")
+
+    for provider_id, provider in models_config.providers.items():
+        has_key = bool(provider.api_key)
+        status = "[green]Configured[/green]" if has_key else "[red]Not set[/red]"
+        key_display = f"***...{provider.api_key[-4:]}" if has_key else "[red]Missing[/red]"
+        table.add_row(provider.name, status, key_display)
+
+    console.print(table)
+    console.print()
+    console.print("[dim]Run 'darkfactory config auth login' to add or update auth.[/dim]")
+
+
+@config_auth.command("list")
+def config_auth_list():
+    """
+    List all authentication profiles.
+
+    Similar to 'openclaw models auth list'.
+    """
+    config_auth_status.callback()
+
 
 
 # =============================================================================
