@@ -80,7 +80,23 @@ darkfactory config set --api-key "your-key" --base-url "https://your-api.com/v1"
 - Python 3.11+
 - pip
 
-### 安装命令
+### 安装方式一：直接使用脚本（推荐）
+
+克隆后添加 `scripts`（Windows）或 `bin`（Linux/Mac）目录到 PATH 即可：
+
+```bash
+# Windows (PowerShell)
+git clone https://github.com/Lawrence1305/DarkFactory.git
+$env:PATH = "E:\Documents\Coding\AIFrameStudy\DarkFactory\scripts;$env:PATH"
+darkfactory config setup   # 首次配置 AI API
+
+# Linux/Mac
+git clone https://github.com/Lawrence1305/DarkFactory.git
+export PATH="/path/to/DarkFactory/bin:$PATH"
+darkfactory config setup   # 首次配置 AI API
+```
+
+### 安装方式二：pip 安装
 
 ```bash
 # 克隆项目
