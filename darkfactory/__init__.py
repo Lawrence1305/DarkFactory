@@ -28,6 +28,7 @@ from .core.task_engine import TaskEngine
 from .core.task_planner import TaskPlanner, PlanResult, PlanStatus
 from .core.workflow import Workflow, WorkflowContext, WorkflowStep
 from .core.validator import Validator, ValidationLevel
+from .core.agent_loop import AgentLoop, register_builtin_tools
 
 console = Console()
 
@@ -494,20 +495,20 @@ def run(run_all: bool, task_id: str, agents: int, workspace: str):
         _run_all_tasks(engine, agents, progress_path)
     elif task_id:
         console.print(f"[cyan]Running task {task_id}...[/cyan]")
-        _run_single_task(engine, task_id)
+        _run_single_task(engine, task_id, workspace_path)
     else:
         # Run next task
         next_task = engine.select_next_task()
         if next_task:
             console.print(f"[cyan]Running next task: {next_task.title}[/cyan]")
-            _run_single_task(engine, next_task.id)
+            _run_single_task(engine, next_task.id, workspace_path)
         else:
             console.print("[yellow]No ready tasks found.[/yellow]")
             console.print(f"[dim]Pending: {stats['pending']}, Blocked: {stats['blocked']}[/dim]")
 
 
-def _run_single_task(engine: TaskEngine, task_id: str):
-    """Run a single task"""
+def _run_single_task(engine: TaskEngine, task_id: str, workspace_path: Path):
+    """Run a single task using the agent loop"""
     task = engine.get_task(task_id)
     if not task:
         console.print(f"[red]Task not found: {task_id}[/red]")
@@ -521,19 +522,67 @@ def _run_single_task(engine: TaskEngine, task_id: str):
     # Mark as in progress
     engine.update_task_status(task_id, TaskStatus.IN_PROGRESS)
 
-    # Execute steps (placeholder - would call LLM/agent)
+    # Show steps to execute
     console.print()
     for i, step in enumerate(task.steps, 1):
         console.print(f"  [cyan]{i}.[/cyan] {step}")
-
     console.print()
-    console.print("[yellow]Task execution requires LLM integration.[/yellow]")
-    console.print("[yellow]This would invoke the agent loop with context and tools.[/yellow]")
 
-    # For now, mark as completed (demo)
-    engine.update_task_status(task_id, TaskStatus.COMPLETED)
-    console.print()
-    console.print(f"[green]Task {task_id} marked as completed (demo mode)[/green]")
+    # Load config and check API key
+    try:
+        config = load_existing_config()
+    except ValueError:
+        console.print("[red]Configuration error: API key not set[/red]")
+        console.print("[dim]Run 'darkfactory config setup' to configure[/dim]")
+        engine.update_task_status(task_id, TaskStatus.BLOCKED, blocked_reason="API key not configured")
+        return
+
+    if not config.llm.api_key:
+        console.print("[red]API key not configured[/red]")
+        console.print("[dim]Run 'darkfactory config setup' to configure[/dim]")
+        engine.update_task_status(task_id, TaskStatus.BLOCKED, blocked_reason="API key not configured")
+        return
+
+    # Register built-in tools
+    register_builtin_tools()
+
+    # Create agent loop
+    agent = AgentLoop(
+        config=config,
+        workspace_path=workspace_path,
+    )
+
+    async def run_task():
+        try:
+            result = await agent.execute_task(task.steps, task.id)
+
+            if result["success"]:
+                console.print(f"[green]Task completed successfully![/green]")
+                console.print(f"[dim]Steps: {result['steps_completed']}/{result['steps_total']}[/dim]")
+                console.print(f"[dim]Duration: {result['duration_seconds']:.1f}s[/dim]")
+
+                if result["files_created"]:
+                    console.print(f"[dim]Files created: {len(result['files_created'])}[/dim]")
+
+                engine.update_task_status(task_id, TaskStatus.COMPLETED)
+            else:
+                console.print(f"[red]Task failed[/red]")
+                console.print(f"[dim]Steps completed: {result['steps_completed']}/{result['steps_total']}[/dim]")
+
+                # Mark as blocked if partial completion
+                if result["steps_completed"] > 0:
+                    engine.update_task_status(task_id, TaskStatus.BLOCKED,
+                                            blocked_reason=f"Partial completion: {result['steps_completed']}/{result['steps_total']} steps")
+
+        finally:
+            await agent.close()
+
+    # Run the task
+    try:
+        asyncio.run(run_task())
+    except Exception as e:
+        console.print(f"[red]Execution error: {e}[/red]")
+        engine.update_task_status(task_id, TaskStatus.BLOCKED, blocked_reason=str(e))
 
 
 def _run_all_tasks(engine: TaskEngine, agents: int, progress_path: Path):
