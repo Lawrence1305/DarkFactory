@@ -497,7 +497,15 @@ def run(run_all: bool, task_id: str, agents: int, workspace: str):
         console.print(f"[cyan]Running task {task_id}...[/cyan]")
         _run_single_task(engine, task_id, workspace_path)
     else:
-        # Run next task
+        # Check for in_progress tasks first (resume interrupted work)
+        in_progress = engine.get_in_progress_tasks()
+        if in_progress:
+            task = in_progress[0]
+            console.print(f"[cyan]Resuming task: {task.title}[/cyan]")
+            _run_single_task(engine, task.id, workspace_path)
+            return
+
+        # Run next pending task
         next_task = engine.select_next_task()
         if next_task:
             console.print(f"[cyan]Running next task: {next_task.title}[/cyan]")
@@ -568,6 +576,11 @@ def _run_single_task(engine: TaskEngine, task_id: str, workspace_path: Path):
             else:
                 console.print(f"[red]Task failed[/red]")
                 console.print(f"[dim]Steps completed: {result['steps_completed']}/{result['steps_total']}[/dim]")
+
+                # Show step errors
+                for step_result in result.get("step_results", []):
+                    if step_result.get("error"):
+                        console.print(f"[red]Step {step_result['step']} error:[/red] {step_result['error']}")
 
                 # Mark as blocked if partial completion
                 if result["steps_completed"] > 0:

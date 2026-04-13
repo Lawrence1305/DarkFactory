@@ -21,7 +21,7 @@ from datetime import datetime
 
 from ..llm.client import LLMClient, Message, MessageRole, create_llm_client
 from ..config import Config, LLMConfig
-from ..tools.registry import ToolRegistry, get_registry
+from ..tools.registry import ToolRegistry, ToolCategory, get_registry
 from ..tools.executor import ToolExecutor
 from ..tools.results import ToolResult
 
@@ -430,40 +430,40 @@ def register_builtin_tools() -> None:
         "read_file",
         read_file,
         description="Read file contents",
-        category="file",
+        category=ToolCategory.FILE,
     )
 
     registry.register(
         "write_file",
         write_file,
         description="Write content to file (creates or overwrites)",
-        category="file",
+        category=ToolCategory.FILE,
     )
 
     registry.register(
         "execute_command",
         execute_command,
         description="Execute shell command and return output",
-        category="execution",
+        category=ToolCategory.EXECUTION,
     )
 
     registry.register(
         "list_directory",
         list_directory,
         description="List directory contents",
-        category="file",
+        category=ToolCategory.FILE,
     )
 
     registry.register(
         "file_exists",
         file_exists,
         description="Check if file or directory exists",
-        category="file",
+        category=ToolCategory.FILE,
     )
 
     registry.register(
         "create_directory",
         create_directory,
         description="Create a directory",
-        category="file",
+        category=ToolCategory.FILE,
     )
