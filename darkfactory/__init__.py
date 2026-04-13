@@ -23,6 +23,11 @@ from rich.prompt import Prompt, Confirm
 from rich import print as rprint
 
 from .config import Config, load_config, detect_provider_type, ProviderType, LLMProvider
+from .config import (
+    ModelsConfig, ModelProvider, ModelDefinition, ModelApi,
+    load_models_config, save_models_config, create_default_models_config,
+    BUILTIN_PROVIDERS
+)
 from .core.task import Task, TaskStatus, TestStrategy
 from .core.task_engine import TaskEngine
 from .core.task_planner import TaskPlanner, PlanResult, PlanStatus
@@ -202,6 +207,177 @@ def config_reset():
         console.print("[yellow]Configuration reset[/yellow]")
     else:
         console.print("[dim]No configuration file to reset[/dim]")
+
+
+# =============================================================================
+# Config Models Subcommands
+# =============================================================================
+
+@config.group("models")
+def config_models():
+    """Manage model providers and configurations."""
+    pass
+
+
+@config_models.command("list")
+def config_models_list():
+    """List all configured models and providers."""
+    models_config = load_models_config()
+
+    console.print("[bold blue]Configured Providers and Models[/bold blue]\n")
+
+    for provider_id, provider in models_config.providers.items():
+        console.print(f"[cyan]{provider.name}[/cyan] ({provider_id})")
+        console.print(f"  URL: {provider.base_url}")
+
+        if provider.api_key:
+            console.print(f"  API Key: ***{provider.api_key[-4:]}")
+        else:
+            console.print(f"  [yellow]API Key: Not set[/yellow]")
+
+        console.print(f"  Models:")
+        for model in provider.models:
+            console.print(f"    - {model.id}: {model.name}")
+        console.print()
+
+
+@config_models.command("add")
+@click.argument("provider_id")
+@click.option("--name", help="Provider display name")
+@click.option("--base-url", help="API base URL")
+@click.option("--api", type=click.Choice(["openai", "anthropic"]), default="openai", help="API type")
+def config_models_add(provider_id: str, name: str, base_url: str, api: str):
+    """Add a new model provider."""
+    models_config = load_models_config()
+
+    if provider_id in models_config.providers:
+        console.print(f"[yellow]Provider '{provider_id}' already exists.[/yellow]")
+        return
+
+    if not base_url:
+        base_url = Prompt.ask("Enter base URL")
+
+    provider = ModelProvider(
+        id=provider_id,
+        name=name or provider_id,
+        base_url=base_url,
+        api=ModelApi(api),
+        models=[],
+    )
+
+    models_config.providers[provider_id] = provider
+    save_models_config(models_config)
+
+    console.print(f"[green]Added provider '{provider_id}'[/green]")
+
+
+@config_models.command("remove")
+@click.argument("provider_id")
+def config_models_remove(provider_id: str):
+    """Remove a model provider."""
+    models_config = load_models_config()
+
+    if provider_id not in models_config.providers:
+        console.print(f"[red]Provider '{provider_id}' not found.[/red]")
+        return
+
+    del models_config.providers[provider_id]
+    save_models_config(models_config)
+
+    console.print(f"[green]Removed provider '{provider_id}'[/green]")
+
+
+@config_models.command("set-primary")
+@click.argument("provider_model")
+def config_models_set_primary(provider_model: str):
+    """Set the primary model (format: provider/model)."""
+    models_config = load_models_config()
+
+    # Validate the provider/model exists
+    provider, model = models_config.get_provider_model(provider_model)
+    if not provider or not model:
+        console.print(f"[red]Unknown provider/model: {provider_model}[/red]")
+        console.print("[dim]Use 'darkfactory config models list' to see available options.[/dim]")
+        return
+
+    models_config.primary_model = provider_model
+    save_models_config(models_config)
+
+    # Also update the main config
+    cfg = load_existing_config()
+    cfg.llm.base_url = provider.base_url
+    cfg.llm.model = model.id
+    if provider.api == ModelApi.ANTHROPIC:
+        cfg.llm.provider_type = ProviderType.ANTHROPIC
+    else:
+        cfg.llm.provider_type = ProviderType.OPENAI
+    cfg.save(str(get_config_path()))
+
+    console.print(f"[green]Primary model set to: {provider_model}[/green]")
+    console.print(f"[dim]Updated main config as well.[/dim]")
+
+
+@config_models.command("add-model")
+@click.argument("provider_id")
+@click.argument("model_id")
+@click.option("--name", help="Model display name")
+@click.option("--max-tokens", type=int, default=4096, help="Max tokens")
+@click.option("--context-window", type=int, default=128000, help="Context window size")
+def config_models_add_model(provider_id: str, model_id: str, name: str, max_tokens: int, context_window: int):
+    """Add a model to a provider."""
+    models_config = load_models_config()
+
+    if provider_id not in models_config.providers:
+        console.print(f"[red]Provider '{provider_id}' not found.[/red]")
+        return
+
+    provider = models_config.providers[provider_id]
+
+    # Check if model already exists
+    if provider.get_model(model_id):
+        console.print(f"[yellow]Model '{model_id}' already exists in provider '{provider_id}'.[/yellow]")
+        return
+
+    model = ModelDefinition(
+        id=model_id,
+        name=name or model_id,
+        api=provider.api,
+        max_tokens=max_tokens,
+        context_window=context_window,
+    )
+
+    provider.models.append(model)
+    save_models_config(models_config)
+
+    console.print(f"[green]Added model '{model_id}' to provider '{provider_id}'[/green]")
+
+
+@config_models.command("set-api-key")
+@click.argument("provider_id")
+def config_models_set_api_key(provider_id: str):
+    """Set API key for a provider."""
+    models_config = load_models_config()
+
+    if provider_id not in models_config.providers:
+        console.print(f"[red]Provider '{provider_id}' not found.[/red]")
+        return
+
+    provider = models_config.providers[provider_id]
+    api_key = Prompt.ask(f"Enter API key for {provider.name}", password=True)
+
+    provider.api_key = api_key
+    save_models_config(models_config)
+
+    console.print(f"[green]API key set for '{provider_id}'[/green]")
+
+
+@config_models.command("reset")
+def config_models_reset():
+    """Reset models configuration to defaults."""
+    models_path = Path.home() / ".darkfactory" / "models.json"
+    if models_path.exists():
+        models_path.unlink()
+    console.print("[yellow]Models config reset to defaults.[/yellow]")
 
 
 # =============================================================================
@@ -536,7 +712,7 @@ def _run_single_task(engine: TaskEngine, task_id: str, workspace_path: Path):
         console.print(f"  [cyan]{i}.[/cyan] {step}")
     console.print()
 
-    # Load config and check API key
+    # Load config and resolve API key from models config if needed
     try:
         config = load_existing_config()
     except ValueError:
@@ -545,11 +721,25 @@ def _run_single_task(engine: TaskEngine, task_id: str, workspace_path: Path):
         engine.update_task_status(task_id, TaskStatus.BLOCKED, blocked_reason="API key not configured")
         return
 
+    # If API key not in main config, try models config
     if not config.llm.api_key:
-        console.print("[red]API key not configured[/red]")
-        console.print("[dim]Run 'darkfactory config setup' to configure[/dim]")
-        engine.update_task_status(task_id, TaskStatus.BLOCKED, blocked_reason="API key not configured")
-        return
+        models_config = load_models_config()
+        provider, model = models_config.resolve_primary()
+        if provider and provider.api_key:
+            config.llm.api_key = provider.api_key
+            config.llm.base_url = provider.base_url
+            if provider.api == ModelApi.ANTHROPIC:
+                config.llm.provider_type = ProviderType.ANTHROPIC
+            else:
+                config.llm.provider_type = ProviderType.OPENAI
+            config.llm.model = model.id if model else config.llm.model
+            console.print(f"[dim]Using API key from provider '{provider.id}'[/dim]")
+        else:
+            console.print("[red]API key not configured[/red]")
+            console.print("[dim]Run 'darkfactory config models set-api-key <provider>' to configure[/dim]")
+            console.print("[dim]Or run 'darkfactory config setup' to configure directly[/dim]")
+            engine.update_task_status(task_id, TaskStatus.BLOCKED, blocked_reason="API key not configured")
+            return
 
     # Register built-in tools
     register_builtin_tools()

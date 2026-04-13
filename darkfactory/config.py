@@ -301,3 +301,269 @@ def reset_config() -> None:
     """Reset global config (for testing)"""
     global _config
     _config = None
+
+
+# =============================================================================
+# Model Configuration - Provider-based model management
+# =============================================================================
+
+import os
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Union
+from enum import Enum
+
+
+class ModelApi(Enum):
+    """Supported model APIs"""
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    OPENAI_COMPAT = "openai-compat"
+
+
+@dataclass
+class ModelDefinition:
+    """Single model definition"""
+    id: str
+    name: str
+    api: ModelApi = ModelApi.OPENAI
+    max_tokens: int = 4096
+    context_window: int = 128000
+    supports_streaming: bool = True
+    supports_tools: bool = True
+    input_types: List[str] = field(default_factory=lambda: ["text"])
+    cost_input: float = 0.0
+    cost_output: float = 0.0
+    cost_cache_read: float = 0.0
+    cost_cache_write: float = 0.0
+    # Extra provider-specific params
+    params: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ModelProvider:
+    """Model provider configuration"""
+    id: str
+    name: str
+    base_url: str
+    api_key: str = ""
+    api: ModelApi = ModelApi.OPENAI
+    headers: Dict[str, str] = field(default_factory=dict)
+    request_params: Dict[str, Any] = field(default_factory=dict)
+    models: List[ModelDefinition] = field(default_factory=list)
+
+    def get_model(self, model_id: str) -> Optional[ModelDefinition]:
+        """Get a model by ID"""
+        for model in self.models:
+            if model.id == model_id:
+                return model
+        return None
+
+
+@dataclass
+class ModelsConfig:
+    """Models configuration - manages multiple providers and models"""
+    providers: Dict[str, ModelProvider] = field(default_factory=dict)
+    primary_model: str = ""
+    fallback_models: List[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ModelsConfig":
+        config = cls()
+        providers_data = data.get("providers", {})
+        for provider_id, provider_data in providers_data.items():
+            models = []
+            for model_data in provider_data.get("models", []):
+                model = ModelDefinition(
+                    id=model_data["id"],
+                    name=model_data.get("name", model_data["id"]),
+                    api=ModelApi(provider_data.get("api", "openai")),
+                    max_tokens=model_data.get("max_tokens", 4096),
+                    context_window=model_data.get("context_window", 128000),
+                    supports_streaming=model_data.get("streaming", True),
+                    supports_tools=model_data.get("tools", True),
+                )
+                models.append(model)
+
+            provider = ModelProvider(
+                id=provider_id,
+                name=provider_data.get("name", provider_id),
+                base_url=provider_data["base_url"],
+                api_key=provider_data.get("api_key", ""),
+                api=ModelApi(provider_data.get("api", "openai")),
+                headers=provider_data.get("headers", {}),
+                models=models,
+            )
+            config.providers[provider_id] = provider
+
+        defaults = data.get("defaults", {})
+        config.primary_model = defaults.get("primary", "")
+        config.fallback_models = defaults.get("fallbacks", [])
+        return config
+
+    def to_dict(self) -> dict:
+        return {
+            "providers": {
+                pid: {
+                    "name": p.name,
+                    "base_url": p.base_url,
+                    "api_key": p.api_key,
+                    "api": p.api.value,
+                    "headers": p.headers,
+                    "models": [
+                        {
+                            "id": m.id,
+                            "name": m.name,
+                            "max_tokens": m.max_tokens,
+                            "context_window": m.context_window,
+                            "streaming": m.supports_streaming,
+                            "tools": m.supports_tools,
+                        }
+                        for m in p.models
+                    ],
+                }
+                for pid, p in self.providers.items()
+            },
+            "defaults": {
+                "primary": self.primary_model,
+                "fallbacks": self.fallback_models,
+            },
+        }
+
+    def get_provider_model(self, provider_model: str) -> tuple:
+        if "/" not in provider_model:
+            return None, None
+        provider_id, model_id = provider_model.split("/", 1)
+        provider = self.providers.get(provider_id)
+        if not provider:
+            return None, None
+        model = provider.get_model(model_id)
+        return provider, model
+
+    def resolve_primary(self) -> tuple:
+        return self.get_provider_model(self.primary_model)
+
+    def resolve_fallbacks(self) -> list:
+        results = []
+        for pm in self.fallback_models:
+            prov, model = self.get_provider_model(pm)
+            if prov and model:
+                results.append((prov, model))
+        return results
+
+
+BUILTIN_PROVIDERS = {
+    "anthropic": {
+        "name": "Anthropic Claude",
+        "base_url": "https://api.anthropic.com/v1/messages",
+        "api": "anthropic",
+        "models": [
+            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4", "context_window": 200000},
+            {"id": "claude-opus-4-6", "name": "Claude Opus 4", "context_window": 200000},
+            {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet", "context_window": 200000},
+        ],
+    },
+    "openai": {
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "api": "openai",
+        "models": [
+            {"id": "gpt-4o", "name": "GPT-4o", "context_window": 128000},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "context_window": 128000},
+            {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "context_window": 128000},
+        ],
+    },
+    "minimax": {
+        "name": "MiniMax",
+        "base_url": "https://api.minimax.chat/v1/text/chatcompletion_v2",
+        "api": "anthropic",
+        "models": [
+            {"id": "MiniMax-Text-01", "name": "MiniMax Text 01", "context_window": 1000000},
+        ],
+    },
+    "qwen": {
+        "name": "Qwen (Tongyi)",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api": "openai",
+        "models": [
+            {"id": "qwen-plus", "name": "Qwen Plus", "context_window": 131072},
+            {"id": "qwen-max", "name": "Qwen Max", "context_window": 131072},
+        ],
+    },
+    "deepseek": {
+        "name": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "api": "openai",
+        "models": [
+            {"id": "deepseek-chat", "name": "DeepSeek Chat", "context_window": 64000},
+            {"id": "deepseek-coder", "name": "DeepSeek Coder", "context_window": 64000},
+        ],
+    },
+    "ollama": {
+        "name": "Ollama (Local)",
+        "base_url": "http://localhost:11434/v1",
+        "api": "openai",
+        "models": [
+            {"id": "llama3", "name": "Llama 3", "context_window": 8192},
+            {"id": "codellama", "name": "Code Llama", "context_window": 16384},
+        ],
+    },
+}
+
+
+def load_models_config(config_path: Optional[Path] = None) -> ModelsConfig:
+    """Load models configuration from file"""
+    if config_path is None:
+        config_dir = Path.home() / ".darkfactory"
+        config_path = config_dir / "models.json"
+
+    if not config_path.exists():
+        return create_default_models_config()
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    return ModelsConfig.from_dict(data)
+
+
+def save_models_config(config: ModelsConfig, config_path: Optional[Path] = None) -> None:
+    """Save models configuration to file"""
+    if config_path is None:
+        config_dir = Path.home() / ".darkfactory"
+        config_path = config_dir / "models.json"
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
+
+
+def create_default_models_config() -> ModelsConfig:
+    """Create default models config with builtin providers"""
+    config = ModelsConfig()
+
+    for provider_id, provider_data in BUILTIN_PROVIDERS.items():
+        models = []
+        for model_data in provider_data.get("models", []):
+            model = ModelDefinition(
+                id=model_data["id"],
+                name=model_data.get("name", model_data["id"]),
+                api=ModelApi(provider_data["api"]),
+                context_window=model_data.get("context_window", 128000),
+            )
+            models.append(model)
+
+        provider = ModelProvider(
+            id=provider_id,
+            name=provider_data["name"],
+            base_url=provider_data["base_url"],
+            api=ModelApi(provider_data["api"]),
+            models=models,
+        )
+        config.providers[provider_id] = provider
+
+    config.primary_model = "anthropic/claude-sonnet-4-6"
+    config.fallback_models = ["openai/gpt-4o"]
+
+    return config
