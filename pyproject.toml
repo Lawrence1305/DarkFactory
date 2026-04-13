@@ -43,7 +43,7 @@ dev = [
 ]
 
 [project.scripts]
-darkfactory = "darkfactory.main:cli"
+darkfactory = "darkfactory:cli"
 
 [build-system]
 requires = ["hatchling"]
