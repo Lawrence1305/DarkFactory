@@ -283,7 +283,7 @@ Return a JSON array of task objects.
                 priority=2,
                 dependencies=[f"task-{task_id-1:03d}"],
                 test_strategy=TestStrategy.AUTO,
-                estimated_duration=120,
+                estimated_duration=20,
             ))
 
         return tasks

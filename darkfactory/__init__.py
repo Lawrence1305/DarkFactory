@@ -207,10 +207,16 @@ def config_reset():
 # Plan Commands
 # =============================================================================
 
-@cli.command()
+@cli.group()
+def plan():
+    """Task planning commands."""
+    pass
+
+
+@plan.command("run")
 @click.argument("goal")
 @click.option("--workspace", "-w", default=".", help="Workspace directory")
-def plan(goal: str, workspace: str):
+def plan_run(goal: str, workspace: str):
     """Plan tasks from natural language goal.
 
     Analyzes the goal and creates a task plan with:
@@ -319,9 +325,9 @@ def _display_plan_result(plan_result: PlanResult, workspace_path: Path):
     console.print(stats_table)
 
 
-@cli.command()
+@plan.command("confirm")
 @click.option("--workspace", "-w", default=".", help="Workspace directory")
-def confirm(workspace: str):
+def plan_confirm(workspace: str):
     """Confirm the current plan and create task.json.
 
     Reads the cached plan and writes it to task.json for execution.
@@ -377,10 +383,10 @@ def confirm(workspace: str):
     console.print("  [cyan]darkfactory run[/cyan] - Execute tasks")
 
 
-@cli.command()
+@plan.command("modify")
 @click.argument("feedback")
 @click.option("--workspace", "-w", default=".", help="Workspace directory")
-def modify(feedback: str, workspace: str):
+def plan_modify(feedback: str, workspace: str):
     """Modify the current plan based on feedback.
 
     This will re-run planning with the modification request.
